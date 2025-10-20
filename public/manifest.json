@@ -1,0 +1,20 @@
+{
+  "short_name": "SHISHA POS",
+  "name": "SHISHA MARRAKECH POS",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/restaurant-menu.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/restaurant-menu.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#2d3748",
+  "background_color": "#1a202c"
+}

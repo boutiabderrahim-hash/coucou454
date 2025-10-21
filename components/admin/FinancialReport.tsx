@@ -21,17 +21,7 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
     const reportData = useMemo(() => {
-        const fourMonthsAgo = new Date();
-        fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
-        fourMonthsAgo.setHours(0, 0, 0, 0);
-
-        const closedOrders = orders.filter(o =>
-            o.status === 'closed' &&
-            o.closedAt &&
-            o.closedAt >= fourMonthsAgo.getTime()
-        );
-
-        const recentShifts = shifts.filter(s => s.startTime >= fourMonthsAgo.getTime());
+        const closedOrders = orders.filter(o => o.status === 'closed' && o.closedAt);
 
         const filterByDate = (timestamp: number) => {
             const itemDate = new Date(timestamp);
@@ -63,37 +53,29 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
         };
         
         const filteredOrders = closedOrders.filter(order => filterByDate(order.closedAt!));
-        const filteredShifts = recentShifts.filter(shift => filterByDate(shift.startTime));
 
         let totalRevenue = 0;
         let totalTax = 0;
         let cardRevenue = 0;
-        let cashRevenue = 0; // Only manual cash entries
-        const displayTransactions: Order[] = [];
+        let cashRevenue = 0;
+        let creditRevenue = 0;
 
-        // --- Procesar Pedidos (Solo pagos con tarjeta) ---
         for (const order of filteredOrders) {
-            const orderCardPayment = order.splitPayments?.filter(p => p.method === 'card').reduce((sum, p) => sum + p.amount, 0) || 0;
-            
-            if (orderCardPayment > 0) {
-                const totalPaidOnOrder = (order.splitPayments || []).reduce((sum, p) => sum + p.amount, 0);
+            totalRevenue += order.total;
+            totalTax += order.tax;
 
-                // Prorate revenue and tax based on the card payment's share of the total payment
-                const cardRatio = totalPaidOnOrder > 0 ? orderCardPayment / totalPaidOnOrder : 0;
-                
-                totalRevenue += order.total * cardRatio;
-                totalTax += order.tax * cardRatio;
-                cardRevenue += orderCardPayment;
-
-                // Only show transactions that have card payments
-                displayTransactions.push(order);
+            if (order.splitPayments) {
+                for (const payment of order.splitPayments) {
+                    if (payment.method === 'card') {
+                        cardRevenue += payment.amount;
+                    } else if (payment.method === 'cash') {
+                        cashRevenue += payment.amount;
+                    } else if (payment.method === 'credit') {
+                        creditRevenue += payment.amount;
+                    }
+                }
             }
         }
-        
-        // --- Procesar Entradas de Caja Manuales ---
-        const manualCashIn = filteredShifts.flatMap(s => s.cashIn).reduce((sum, mov) => sum + mov.amount, 0);
-        cashRevenue += manualCashIn;
-        totalRevenue += manualCashIn; // Manual cash-in is considered revenue without tax
 
         const netRevenue = totalRevenue - totalTax;
         
@@ -103,10 +85,11 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
             totalTax,
             cardRevenue,
             cashRevenue,
-            transactionCount: displayTransactions.length,
-            transactions: displayTransactions.sort((a, b) => b.closedAt! - a.closedAt!),
+            creditRevenue,
+            transactionCount: filteredOrders.length,
+            transactions: filteredOrders.sort((a, b) => b.closedAt! - a.closedAt!),
         };
-    }, [orders, shifts, period, selectedDate]);
+    }, [orders, period, selectedDate]);
     
     const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSelectedDate(e.target.value);
@@ -152,7 +135,7 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
                 <StatCard title="Total IVA (21%)" value={formatCurrency(reportData.totalTax)} icon={<CalculatorIcon className="h-6 w-6 text-yellow-400"/>} />
                 <StatCard title="Ingresos por Tarjeta" value={formatCurrency(reportData.cardRevenue)} icon={<CreditCardIcon className="h-6 w-6 text-blue-400"/>} />
                 <StatCard title="Ingresos en Efectivo" value={formatCurrency(reportData.cashRevenue)} icon={<CurrencyEuroIcon className="h-6 w-6 text-green-400"/>} />
-                <StatCard title="Nº de Transacciones" value={reportData.transactionCount.toString()} icon={<TicketIcon className="h-6 w-6 text-purple-400"/>} />
+                <StatCard title="Ventas a Crédito" value={formatCurrency(reportData.creditRevenue)} icon={<TicketIcon className="h-6 w-6 text-orange-400"/>} />
             </div>
 
             <h3 className="text-xl font-bold mb-4">Transacciones del Periodo</h3>
@@ -174,6 +157,7 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
                             {reportData.transactions.map(order => {
                                 const cash = order.splitPayments?.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0) || 0;
                                 const card = order.splitPayments?.filter(p => p.method === 'card').reduce((sum, p) => sum + p.amount, 0) || 0;
+                                const credit = order.splitPayments?.filter(p => p.method === 'credit').reduce((sum, p) => sum + p.amount, 0) || 0;
                                 return (
                                 <tr key={order.id} className="hover:bg-gray-800">
                                     <td className="px-6 py-4">{order.orderNumber}</td>
@@ -183,6 +167,7 @@ const FinancialReport: React.FC<{ orders: Order[], shifts: Shift[] }> = ({ order
                                     <td className="px-6 py-4 text-right text-xs">
                                         {cash > 0 && <div>Efectivo: {formatCurrency(cash)}</div>}
                                         {card > 0 && <div>Tarjeta: {formatCurrency(card)}</div>}
+                                        {credit > 0 && <div>Crédito: {formatCurrency(credit)}</div>}
                                     </td>
                                     <td className="px-6 py-4 text-right">{formatCurrency(order.tax)}</td>
                                     <td className="px-6 py-4 text-right">{formatCurrency(order.total - order.tax)}</td>

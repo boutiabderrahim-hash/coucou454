@@ -1,7 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { Waiter, Category, MenuItem, InventoryItem, Customer, Order, Shift } from '../../types';
-import { ArrowDownTrayIcon, ArrowUpTrayIcon, ClipboardDocumentListIcon, ClockIcon } from '../icons';
-import ConfirmationModal from '../ConfirmationModal';
+import { mockWaiters, mockCategories, mockMenuItems, mockInventory, mockCustomers } from '../../data/mockData';
+import { ArrowDownTrayIcon, ArrowUpTrayIcon, ExclamationTriangleIcon } from '../icons';
 
 interface DataManagementProps {
     waiters: Waiter[];
@@ -20,288 +20,98 @@ interface DataManagementProps {
     setShifts: React.Dispatch<React.SetStateAction<Shift[]>>;
 }
 
-type DataType = 'waiters' | 'categories' | 'menuItems' | 'inventory' | 'customers' | 'orders' | 'shifts';
-
-const DataManagement: React.FC<DataManagementProps> = ({
-    waiters, setWaiters,
-    categories, setCategories,
-    menuItems, setMenuItems,
-    inventory, setInventory,
-    customers, setCustomers,
-    orders, setOrders,
-    shifts, setShifts,
-}) => {
-    const fileInputs = {
-        waiters: useRef<HTMLInputElement>(null),
-        categories: useRef<HTMLInputElement>(null),
-        menuItems: useRef<HTMLInputElement>(null),
-        inventory: useRef<HTMLInputElement>(null),
-        customers: useRef<HTMLInputElement>(null),
-        orders: useRef<HTMLInputElement>(null),
-        shifts: useRef<HTMLInputElement>(null),
-        all: useRef<HTMLInputElement>(null),
-    };
-
-    const [isConfirmModalOpen, setConfirmModalOpen] = useState(false);
-    const [importData, setImportData] = useState<{ type: DataType | 'all'; data: any } | null>(null);
-
-    // --- Helper Functions ---
-
-    const jsonToCsv = (json: any[]): string => {
-        if (!json || json.length === 0) return '';
-        const headers = Object.keys(json[0]);
-        const csvRows = [headers.join(',')];
-        for (const row of json) {
-            const values = headers.map(header => {
-                let value = row[header];
-                if (typeof value === 'object' && value !== null) {
-                    value = JSON.stringify(value); // Stringify objects/arrays
-                }
-                if (value === null || value === undefined) {
-                    return '""';
-                }
-                const escaped = ('' + value).replace(/"/g, '""');
-                return `"${escaped}"`;
-            });
-            csvRows.push(values.join(','));
-        }
-        return csvRows.join('\n');
-    };
+const DataManagement: React.FC<DataManagementProps> = (props) => {
     
-    const csvToJson = (csv: string): any[] => {
-        const lines = csv.split(/\r\n|\n/);
-        if (lines.length < 2) return [];
-        const result = [];
-        const headers = lines[0].trim().split(',').map(h => h.replace(/^"|"$/g, ''));
-    
-        for (let i = 1; i < lines.length; i++) {
-            const currentline = lines[i].trim();
-            if (!currentline) continue;
-            
-            const obj: { [key: string]: any } = {};
-            const values = currentline.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-
-            headers.forEach((header, index) => {
-                let value = (values[index] || '').replace(/^"|"$/g, '').replace(/""/g, '"');
-                
-                // Attempt to parse JSON strings
-                if ((value.startsWith('[') && value.endsWith(']')) || (value.startsWith('{') && value.endsWith('}'))) {
-                    try {
-                        obj[header] = JSON.parse(value);
-                        return; // Move to next header if parse is successful
-                    } catch (e) {
-                        // Not a valid JSON string, treat as regular string
-                    }
-                }
-                
-                // Attempt to convert to number or boolean if applicable
-                if (!isNaN(Number(value)) && value.trim() !== '' && !isNaN(parseFloat(value))) {
-                    obj[header] = Number(value);
-                } else if (value.toLowerCase() === 'true' || value.toLowerCase() === 'false') {
-                    obj[header] = value.toLowerCase() === 'true';
-                } else {
-                    obj[header] = value;
-                }
-            });
-            result.push(obj);
-        }
-        return result;
+    const handleExport = () => {
+        const dataToExport = {
+            waiters: props.waiters,
+            categories: props.categories,
+            menuItems: props.menuItems,
+            inventory: props.inventory,
+            customers: props.customers,
+            orders: props.orders,
+            shifts: props.shifts,
+        };
+        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToExport, null, 2))}`;
+        const link = document.createElement("a");
+        link.href = jsonString;
+        link.download = `pos_backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
     };
 
-    const downloadFile = (blob: Blob, filename: string) => {
-         const link = document.createElement('a');
-        if (link.download !== undefined) {
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-    }
-
-    // --- Export Logic ---
-
-    const handleExport = (type: DataType) => {
-        const dataMap = { waiters, categories, menuItems, inventory, customers, orders, shifts };
-        const data = dataMap[type];
-        const csv = jsonToCsv(data);
-        if (!csv) {
-            alert('No hay datos para exportar.');
-            return;
-        }
-        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-        downloadFile(blob, `${type}_export_${new Date().toISOString().split('T')[0]}.csv`);
-    };
-
-    const handleExportAll = () => {
-        const allData = { waiters, categories, menuItems, inventory, customers, orders, shifts };
-        const jsonString = JSON.stringify(allData, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        downloadFile(blob, `pos_backup_${new Date().toISOString().split('T')[0]}.json`);
-    };
-    
-    // --- Import Logic ---
-
-    const handleImportClick = (type: DataType | 'all') => {
-        fileInputs[type].current?.click();
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: DataType | 'all') => {
-        const file = e.target.files?.[0];
+    const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = (e) => {
             try {
-                const text = event.target?.result as string;
-                let jsonData;
-                if (type === 'all') {
-                    jsonData = JSON.parse(text);
-                    // Basic validation for the all-data object
-                    if (!jsonData || typeof jsonData !== 'object' || !('waiters' in jsonData && 'categories' in jsonData)) {
-                        throw new Error('El archivo JSON de copia de seguridad no tiene el formato correcto.');
-                    }
-                } else {
-                    jsonData = csvToJson(text);
-                    if (jsonData.length === 0 && text.trim().split(/\r\n|\n/).length > 1) {
-                         // File has content but parsing resulted in empty array, might be a format issue.
-                        throw new Error('El archivo CSV está vacío o tiene un formato incorrecto.');
-                    }
-                }
-                
-                setImportData({ type, data: jsonData });
-                setConfirmModalOpen(true);
+                const text = e.target?.result as string;
+                const importedData = JSON.parse(text);
 
+                if (window.confirm("¿Seguro que quieres importar estos datos? Se sobrescribirá toda la información actual.")) {
+                    if (importedData.waiters) props.setWaiters(importedData.waiters);
+                    if (importedData.categories) props.setCategories(importedData.categories);
+                    if (importedData.menuItems) props.setMenuItems(importedData.menuItems);
+                    if (importedData.inventory) props.setInventory(importedData.inventory);
+                    if (importedData.customers) props.setCustomers(importedData.customers);
+                    if (importedData.orders) props.setOrders(importedData.orders);
+                    if (importedData.shifts) props.setShifts(importedData.shifts);
+                    alert("¡Datos importados con éxito!");
+                }
             } catch (error) {
-                console.error("Error processing file:", error);
-                alert(`Error al procesar el archivo. Por favor, verifique el formato. Detalles: ${error instanceof Error ? error.message : String(error)}`);
+                console.error("Error al importar el archivo:", error);
+                alert("Hubo un error al procesar el archivo. Asegúrate de que es un archivo de respaldo válido.");
             }
         };
-        reader.readAsText(file, 'UTF-8');
-        e.target.value = ''; // Reset input to allow re-uploading the same file
+        reader.readAsText(file);
+        // Reset file input to allow importing the same file again
+        event.target.value = '';
     };
 
-    const confirmImport = () => {
-        if (!importData) return;
-
-        if (importData.type === 'all') {
-            setCategories(importData.data.categories || []);
-            setMenuItems(importData.data.menuItems || []);
-            setInventory(importData.data.inventory || []);
-            setWaiters(importData.data.waiters || []);
-            setCustomers(importData.data.customers || []);
-            setOrders(importData.data.orders || []);
-            setShifts(importData.data.shifts || []);
-        } else {
-            const setterMap = {
-                waiters: setWaiters,
-                categories: setCategories,
-                menuItems: setMenuItems,
-                inventory: setInventory,
-                customers: setCustomers,
-                orders: setOrders,
-                shifts: setShifts,
-            };
-            setterMap[importData.type](importData.data);
+    const handleResetData = () => {
+        if (window.confirm("¡ADVERTENCIA! Esta acción es irreversible y eliminará TODOS los datos (pedidos, turnos, clientes, etc.), restaurando la configuración de demostración. ¿Estás absolutamente seguro de que quieres continuar?")) {
+            props.setWaiters(mockWaiters);
+            props.setCategories(mockCategories);
+            props.setMenuItems(mockMenuItems);
+            props.setInventory(mockInventory);
+            props.setCustomers(mockCustomers);
+            props.setOrders([]);
+            props.setShifts([]);
+            alert("Los datos han sido restaurados a la configuración de demostración.");
         }
-        
-        setConfirmModalOpen(false);
-        setImportData(null);
-        alert('¡Datos importados con éxito!');
     };
-    
-    const getConfirmationMessage = () => {
-        if (!importData) return '';
-        if (importData.type === 'all') {
-            return '¿Estás seguro de que quieres restaurar esta copia de seguridad? Se sobreescribirán TODOS los datos actuales (menú, clientes, camareros, pedidos, turnos, etc). Esta acción no se puede deshacer.';
-        }
-        const recordCount = Array.isArray(importData.data) ? importData.data.length : 'un número de';
-        return `¿Estás seguro de que quieres importar ${recordCount} registros? Esto sobreescribirá todos los datos existentes de "${importData.type}". Esta acción no se puede deshacer.`;
-    }
-
-    const dataSections: { type: DataType; title: string, icon: React.ReactNode }[] = [
-        { type: 'categories', title: 'Categorías', icon: <div/> },
-        { type: 'menuItems', title: 'Artículos del Menú', icon: <div/> },
-        { type: 'inventory', title: 'Inventario', icon: <div/> },
-        { type: 'waiters', title: 'Camareros', icon: <div/> },
-        { type: 'customers', title: 'Clientes', icon: <div/> },
-        { type: 'orders', title: 'Pedidos (Historial)', icon: <ClipboardDocumentListIcon className="h-6 w-6 text-gray-400"/> },
-        { type: 'shifts', title: 'Turnos (Historial)', icon: <ClockIcon className="h-6 w-6 text-gray-400"/> },
-    ];
 
     return (
         <div>
-            <h2 className="text-2xl font-bold mb-6">Gestión de Datos (Importar/Exportar)</h2>
-            
-            <div className="bg-gray-900 p-8 rounded-lg mb-8">
-                <h3 className="text-xl font-bold mb-4 border-b border-gray-700 pb-2">Copia de Seguridad Completa</h3>
-                <p className="text-gray-400 mb-4">Exporta o importa toda la configuración y el historial del sistema en un único archivo. Ideal para copias de seguridad o para migrar a otro dispositivo.</p>
-                <div className="flex gap-4">
-                     <input type="file" ref={fileInputs.all} className="hidden" accept=".json" onChange={(e) => handleFileChange(e, 'all')} />
-                    <button onClick={handleExportAll} className="w-full flex items-center justify-center gap-2 p-4 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                        <ArrowDownTrayIcon className="h-6 w-6" /> Exportar Todo (JSON)
+            <h2 className="text-2xl font-bold mb-6">Gestión de Datos</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gray-900 rounded-lg shadow p-6">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><ArrowDownTrayIcon className="h-6 w-6"/> Exportar Datos</h3>
+                    <p className="text-gray-400 mb-4">Guarda una copia de seguridad de todos los datos de tu aplicación en un archivo JSON.</p>
+                    <button onClick={handleExport} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">
+                        Exportar a Archivo
                     </button>
-                    <button onClick={() => handleImportClick('all')} className="w-full flex items-center justify-center gap-2 p-4 bg-green-600 rounded-lg font-semibold hover:bg-green-700 transition-colors">
-                        <ArrowUpTrayIcon className="h-6 w-6" /> Importar Todo (JSON)
-                    </button>
+                </div>
+
+                <div className="bg-gray-900 rounded-lg shadow p-6">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><ArrowUpTrayIcon className="h-6 w-6"/> Importar Datos</h3>
+                    <p className="text-gray-400 mb-4">Carga datos desde un archivo de respaldo JSON. Esto sobrescribirá los datos actuales.</p>
+                     <label className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg cursor-pointer flex items-center justify-center">
+                        <span>Seleccionar Archivo para Importar</span>
+                        <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                    </label>
                 </div>
             </div>
 
-            <div className="bg-gray-900 p-8 rounded-lg">
-                 <h3 className="text-xl font-bold mb-4 border-b border-gray-700 pb-2">Gestión por Partes (CSV)</h3>
-                <p className="text-yellow-400 bg-yellow-900 bg-opacity-25 p-4 rounded-lg mb-8">
-                    <strong>¡Atención!</strong> La importación de un archivo CSV reemplazará por completo los datos existentes para esa categoría. Se recomienda exportar sus datos actuales como copia de seguridad antes de importar.
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Export Column */}
-                    <div>
-                        <h4 className="text-lg font-semibold mb-4">Exportar a CSV para Editar</h4>
-                        <div className="space-y-3">
-                            {dataSections.map(({ type, title }) => (
-                                <button key={type} onClick={() => handleExport(type)} className="w-full flex items-center justify-between p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors">
-                                    <span className="font-semibold">{title}</span>
-                                    <ArrowDownTrayIcon className="h-6 w-6 text-blue-400" />
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Import Column */}
-                    <div>
-                        <h4 className="text-lg font-semibold mb-4">Importar desde CSV</h4>
-                        <div className="space-y-3">
-                            {dataSections.map(({ type, title }) => (
-                                <div key={type}>
-                                    <input
-                                        type="file"
-                                        ref={fileInputs[type]}
-                                        className="hidden"
-                                        accept=".csv"
-                                        onChange={(e) => handleFileChange(e, type)}
-                                    />
-                                    <button onClick={() => handleImportClick(type)} className="w-full flex items-center justify-between p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors">
-                                        <span className="font-semibold">{title}</span>
-                                        <ArrowUpTrayIcon className="h-6 w-6 text-green-400" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
+            <div className="mt-8 bg-red-900 bg-opacity-25 border border-red-500 rounded-lg p-6">
+                <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-red-400"><ExclamationTriangleIcon className="h-6 w-6"/> Zona de Peligro</h3>
+                <p className="text-red-300 mb-4">Esta acción eliminará todos los pedidos, turnos y clientes, y restaurará los datos de demostración (menú, categorías, camareros, etc.). Úsalo con precaución.</p>
+                 <button onClick={handleResetData} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">
+                    Restaurar Datos de Demostración
+                </button>
             </div>
-            {isConfirmModalOpen && importData && (
-                 <ConfirmationModal
-                    isOpen={isConfirmModalOpen}
-                    onClose={() => setConfirmModalOpen(false)}
-                    title={`Confirmar Importación`}
-                    message={getConfirmationMessage()}
-                    onConfirm={confirmImport}
-                    confirmText='Sí, Importar'
-                />
-            )}
         </div>
     );
 };

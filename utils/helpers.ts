@@ -8,68 +8,74 @@ export const formatCurrency = (amount: number): string => {
 };
 
 const textToThermal = (text: string) => text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-const generateDashedLine = () => '<div style="border-top: 1px dashed black; margin: 4px 0;"></div>';
+const generateDashedLine = (width = 32) => '-'.repeat(width) + '\n';
+const padLine = (left: string, right: string, width = 32): string => {
+    const spaceCount = Math.max(1, width - left.length - right.length);
+    return left + ' '.repeat(spaceCount) + right + '\n';
+};
+const centerText = (text: string, width = 32): string => {
+    const padding = Math.floor((width - text.length) / 2);
+    return ' '.repeat(padding > 0 ? padding : 0) + text + '\n';
+}
 
 export const generateReceiptHTML = (order: Order, settings: RestaurantSettings): string => {
-    let html = `<div style="font-family: 'Courier New', monospace; font-size: 12px; color: black; max-width: 300px; padding: 5px;">`;
-    
-    html += `<div style="text-align: center;">`;
-    if (settings.logoUrl) {
-      // Note: Most thermal printers don't render images well from URLs. A base64 encoded, dithered image would be better if needed.
-      // For simplicity, we omit it, but a text-based logo could be an option.
-    }
-    html += `<h1 style="font-size: 16px; font-weight: bold; margin: 0;">${textToThermal(settings.name)}</h1>`;
-    html += `<p style="margin: 2px 0;">${textToThermal(settings.address)}</p>`;
-    html += `<p style="margin: 2px 0;">${textToThermal(settings.phone)}</p>`;
-    html += `</div>`;
-    
-    html += generateDashedLine();
-    
+    const width = 32;
+    let content = '';
+
+    // Header
+    if(settings.name) content += centerText(settings.name, width);
+    if(settings.address) content += centerText(settings.address, width);
+    if(settings.phone) content += centerText(settings.phone, width);
+    content += generateDashedLine(width);
+
+    // Order Info
     const date = new Date(order.closedAt || order.createdAt);
-    html += `<p style="margin: 2px 0;">Fecha: ${date.toLocaleDateString('es-ES')} ${date.toLocaleTimeString('es-ES')}</p>`;
-    html += `<p style="margin: 2px 0;">Mesa: ${order.tableNumber} | Camarero: ${textToThermal(order.waiterName)}</p>`;
-    html += `<p style="margin: 2px 0;">Pedido Nº: ${order.orderNumber}</p>`;
-    
-    html += generateDashedLine();
-    
-    html += `<table><tbody>`;
+    content += `Fecha: ${date.toLocaleString('es-ES')}\n`;
+    content += `Mesa: ${order.tableNumber} | Cam: ${textToThermal(order.waiterName)}\n`;
+    content += `Pedido No: ${order.orderNumber}\n`;
+    content += generateDashedLine(width);
+
+    // Items
     order.items.forEach(item => {
-        html += `<tr>
-            <td colspan="3" style="padding-top: 4px;">${item.quantity}x ${textToThermal(item.name)}</td>
-            <td style="text-align: right; padding-top: 4px;">${formatCurrency(item.price * item.quantity)}</td>
-        </tr>`;
+        const itemTotal = formatCurrency(item.price * item.quantity);
+        content += `${item.quantity}x ${textToThermal(item.name)}\n`;
+        content += padLine(`  (${formatCurrency(item.price)})`, itemTotal, width);
     });
-    html += `</tbody></table>`;
-    
-    html += generateDashedLine();
-    
-    html += `<div style="display: flex; justify-content: space-between;"><span>SUBTOTAL:</span> <strong>${formatCurrency(order.subtotal)}</strong></div>`;
+    content += generateDashedLine(width);
+
+    // Totals
+    const subtotalText = order.total / (1 + 0.21); // Recalculate pre-tax subtotal for display
+    content += padLine('Base Imponible:', formatCurrency(subtotalText), width);
     if (order.discount && order.discount.amount > 0) {
-        html += `<div style="display: flex; justify-content: space-between;"><span>DESCUENTO:</span> <strong>-${formatCurrency(order.discount.amount)}</strong></div>`;
+        content += padLine('DESCUENTO:', `-${formatCurrency(order.discount.amount)}`, width);
     }
-    html += `<div style="display: flex; justify-content: space-between;"><span>IVA (21%):</span> <strong>${formatCurrency(order.tax)}</strong></div>`;
-    html += `<div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin-top: 4px;"><span>TOTAL:</span> <strong>${formatCurrency(order.total)}</strong></div>`;
+    content += padLine('IVA (21%):', formatCurrency(order.tax), width);
+    content += generateDashedLine(width);
+    content += padLine('TOTAL:', formatCurrency(order.total), width);
+    content += generateDashedLine(width);
 
+    // Payments
     if (order.splitPayments && order.splitPayments.length > 0) {
-        html += generateDashedLine();
         order.splitPayments.forEach(p => {
-            const method = p.method === 'cash' ? 'Efectivo' : p.method === 'card' ? 'Tarjeta' : 'Crédito';
-            html += `<div style="display: flex; justify-content: space-between;"><span>${method}:</span> <span>${formatCurrency(p.amount)}</span></div>`;
+            const method = p.method === 'cash' ? 'Efectivo' : p.method === 'card' ? 'Tarjeta' : 'Credito';
+            content += padLine(`${method}:`, formatCurrency(p.amount), width);
         });
+        const totalPaid = order.splitPayments.reduce((sum, p) => sum + p.amount, 0);
+        const change = totalPaid - order.total;
+        if (change > 0.005) {
+             content += padLine('CAMBIO:', formatCurrency(change), width);
+        }
+        content += generateDashedLine(width);
     }
 
-    html += generateDashedLine();
-
-    html += `<div style="text-align: center; margin-top: 5px;">`;
+    // Footer
     if (settings.footer) {
-        html += `<p style="margin: 0;">${textToThermal(settings.footer)}</p>`;
+        content += centerText(settings.footer, width);
     }
-    html += `</div>`;
-    
-    html += `</div>`;
-    return html;
+
+    return `<pre style="font-family: 'Courier New', monospace; font-size: 10pt; color: black; margin: 0; padding: 5px; width: 300px; line-height: 1.2;">${textToThermal(content)}</pre>`;
 };
+
 
 export const generateKitchenTicketHTML = (order: Order, settings: RestaurantSettings): string => {
     const { kitchenTicket } = settings;
@@ -81,13 +87,13 @@ export const generateKitchenTicketHTML = (order: Order, settings: RestaurantSett
     if (kitchenTicket.showWaiter) html += `<p style="margin: 2px 0;">CAMARERO: ${textToThermal(order.waiterName)}</p>`;
     if (kitchenTicket.showTime) html += `<p style="margin: 2px 0;">HORA: ${new Date(order.createdAt).toLocaleTimeString('es-ES')}</p>`;
     
-    html += generateDashedLine();
+    html += '<div style="border-top: 1px dashed black; margin: 4px 0;"></div>';
     
     order.items.forEach(item => {
         html += `<p style="margin: 5px 0; font-size: 18px;">${item.quantity}x ${textToThermal(item.name)}</p>`;
     });
 
-    html += generateDashedLine();
+    html += '<div style="border-top: 1px dashed black; margin: 4px 0;"></div>';
     
     if (kitchenTicket.footer) {
         html += `<div style="text-align: center; margin-top: 5px;">${textToThermal(kitchenTicket.footer)}</div>`;

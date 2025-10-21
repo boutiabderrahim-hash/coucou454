@@ -1,156 +1,119 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { AppScreen, Waiter, Table, Order, Category, MenuItem, InventoryItem, RestaurantSettings, Area, Shift, CashMovement, Customer, OrderItem, Payment, Discount } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Waiter, AppScreen, Order, MenuItem, OrderItem, Category, InventoryItem, Table, Area, RestaurantSettings, Customer, Shift, Payment, CashMovement, Addition, Role } from './types';
 import { useLocalStorage } from './utils/hooks';
-import { mockWaiters, mockCategories, mockMenuItems, mockInventory, mockTables, mockAreas, mockCustomers, mockSettings } from './data/mockData';
-import { TAX_RATE } from './constants';
+import { mockWaiters, mockCategories, mockMenuItems, mockInventory, mockTables, mockAreas, mockSettings, mockCustomers } from './data/mockData';
 import WaiterSelectionScreen from './components/WaiterSelectionScreen';
 import Header from './components/Header';
-import Sidebar from './components/Sidebar';
 import TableSelectionScreen from './components/TableSelectionScreen';
 import Menu from './components/Menu';
 import CurrentOrder from './components/CurrentOrder';
-import AdminView from './components/admin/AdminView';
+import PaymentModal from './components/PaymentModal';
 import OpeningBalanceModal from './components/OpeningBalanceModal';
+import Sidebar from './components/Sidebar';
+import AdminView from './components/admin/AdminView';
 import ManagerDashboard from './components/admin/ManagerDashboard';
 import CashMovementModal from './components/admin/CashMovementModal';
-import OpenOrdersWarningModal from './components/OpenOrdersWarningModal';
 import ShiftSummaryModal from './components/admin/ShiftSummaryModal';
-import PaymentModal from './components/PaymentModal';
+import OpenOrdersWarningModal from './components/OpenOrdersWarningModal';
 import CustomerSelectionModal from './components/CustomerSelectionModal';
-import CustomerManagement from './components/admin/CustomerManagement';
 import CustomerFormModal from './components/admin/CustomerFormModal';
+import DiscountModal from './components/DiscountModal';
 import PostPaymentConfirmationModal from './components/PostPaymentConfirmationModal';
 import ReceiptPreviewModal from './components/ReceiptPreviewModal';
-import DiscountModal from './components/DiscountModal';
-import ConfirmationModal from './components/ConfirmationModal';
-import { generateKitchenTicketHTML, generateCashDrawerKickHTML } from './utils/helpers';
+import { generateKitchenTicketHTML } from './utils/helpers';
+import { TAX_RATE } from './constants';
+import CustomerManagement from './components/admin/CustomerManagement';
+import CustomerCountModal from './components/CustomerCountModal';
 
 const App: React.FC = () => {
-    // State management using local storage for persistence
-    const [waiters, setWaiters] = useLocalStorage<Waiter[]>('pos-waiters', mockWaiters);
-    const [categories, setCategories] = useLocalStorage<Category[]>('pos-categories', mockCategories);
-    const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('pos-menuItems', mockMenuItems);
-    const [inventory, setInventory] = useLocalStorage<InventoryItem[]>('pos-inventory', mockInventory);
-    const [tables, setTables] = useLocalStorage<Table[]>('pos-tables', mockTables);
-    const [areas, setAreas] = useLocalStorage<Area[]>('pos-areas', mockAreas);
-    const [settings, setSettings] = useLocalStorage<RestaurantSettings>('pos-settings', mockSettings);
-    const [orders, setOrders] = useLocalStorage<Order[]>('pos-orders', []);
-    const [shifts, setShifts] = useLocalStorage<Shift[]>('pos-shifts', []);
-    const [customers, setCustomers] = useLocalStorage<Customer[]>('pos-customers', mockCustomers);
-    const [orderNumber, setOrderNumber] = useLocalStorage<number>('pos-orderNumber', 1);
-    
-    // Application runtime state
-    const [loggedInWaiter, setLoggedInWaiter] = useState<Waiter | null>(null);
+    // Local storage state
+    const [waiters, setWaiters] = useLocalStorage<Waiter[]>('pos_waiters', mockWaiters);
+    const [categories, setCategories] = useLocalStorage<Category[]>('pos_categories', mockCategories);
+    const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('pos_menu_items', mockMenuItems);
+    const [inventory, setInventory] = useLocalStorage<InventoryItem[]>('pos_inventory', mockInventory);
+    const [orders, setOrders] = useLocalStorage<Order[]>('pos_orders', []);
+    const [tables, setTables] = useLocalStorage<Table[]>('pos_tables', mockTables);
+    const [areas, setAreas] = useLocalStorage<Area[]>('pos_areas', mockAreas);
+    const [settings, setSettings] = useLocalStorage<RestaurantSettings>('pos_settings', mockSettings);
+    const [customers, setCustomers] = useLocalStorage<Customer[]>('pos_customers', mockCustomers);
+    const [shifts, setShifts] = useLocalStorage<Shift[]>('pos_shifts', []);
+    const [orderNumber, setOrderNumber] = useLocalStorage<number>('pos_order_number', 1);
+
+    // App state
+    const [currentWaiter, setCurrentWaiter] = useState<Waiter | null>(null);
     const [activeShift, setActiveShift] = useState<Shift | null>(null);
-    const [currentView, setCurrentView] = useState<AppScreen>('table-selection');
+    const [currentScreen, setCurrentScreen] = useState<AppScreen>('table-selection');
     const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
     const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
-    
-    // Modal visibility state
+    const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [isOpeningBalanceModalOpen, setOpeningBalanceModalOpen] = useState(false);
     const [isCashMovementModalOpen, setCashMovementModalOpen] = useState(false);
     const [cashMovementType, setCashMovementType] = useState<'in' | 'out'>('in');
     const [isShiftSummaryModalOpen, setShiftSummaryModalOpen] = useState(false);
-    const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
-    const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
+    const [openOrdersForShift, setOpenOrdersForShift] = useState<Order[]>([]);
+    const [isCustomerSelectionModalOpen, setCustomerSelectionModalOpen] = useState(false);
     const [isCustomerFormModalOpen, setCustomerFormModalOpen] = useState(false);
-    const [isReceiptModalOpen, setReceiptModalOpen] = useState(false);
-    const [isPostPaymentModalOpen, setPostPaymentModalOpen] = useState(false);
     const [isDiscountModalOpen, setDiscountModalOpen] = useState(false);
-    const [isCancelConfirmModalOpen, setCancelConfirmModalOpen] = useState(false);
-    const [orderToPrint, setOrderToPrint] = useState<Order | null>(null);
-    const [isEndShiftWarningOpen, setEndShiftWarningOpen] = useState(false);
+    const [isPostPaymentModalOpen, setPostPaymentModalOpen] = useState(false);
+    const [isReceiptPreviewModalOpen, setReceiptPreviewModalOpen] = useState(false);
+    const [orderForReceipt, setOrderForReceipt] = useState<Order | null>(null);
+    const [isCustomerCountModalOpen, setIsCustomerCountModalOpen] = useState(false);
 
-    const lowStockItems = useMemo(() => {
-        return inventory.filter(item => item.quantity <= item.lowStockThreshold);
-    }, [inventory]);
+    const lowStockItems = inventory.filter(item => item.quantity <= item.lowStockThreshold);
 
-    // Derived State
-    const openOrders = useMemo(() => orders.filter(o => o.status === 'open'), [orders]);
-
-    // Effects
-    useEffect(() => {
-        if (!loggedInWaiter) {
-            setActiveShift(null);
-            setCurrentView('table-selection');
-            setSelectedTableId(null);
-            setCurrentOrder(null);
-        } else {
-             // Find the single active shift for the day, not per waiter
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            const activeShiftForDay = shifts.find(s => s.startTime >= todayStart.getTime() && !s.endTime);
-
-            if (activeShiftForDay) {
-                setActiveShift(activeShiftForDay);
-            } else {
-                setOpeningBalanceModalOpen(true);
+    const calculateTotals = useCallback((items: OrderItem[], discount?: { type: 'percentage' | 'fixed', value: number }): { subtotal: number, tax: number, total: number, discountAmount: number } => {
+        const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
+        
+        let discountAmount = 0;
+        if (discount) {
+            if (discount.type === 'percentage') {
+                discountAmount = subtotal * (discount.value / 100);
+            } else { // fixed
+                discountAmount = Math.min(subtotal, discount.value);
             }
         }
-    }, [loggedInWaiter, shifts]);
+
+        const discountedSubtotal = subtotal - discountAmount;
+        const tax = discountedSubtotal * TAX_RATE;
+        const total = discountedSubtotal + tax;
+        
+        return { subtotal, tax, total, discountAmount };
+    }, []);
 
     useEffect(() => {
-        if(selectedTableId) {
-            const existingOrder = orders.find(o => o.tableNumber === selectedTableId && o.status === 'open');
-            if (existingOrder) {
-                setCurrentOrder(existingOrder);
-            } else {
-                const newOrder: Order = {
-                    id: `order-${Date.now()}`,
-                    orderNumber: orderNumber,
-                    tableNumber: selectedTableId,
-                    waiterId: loggedInWaiter!.id,
-                    waiterName: loggedInWaiter!.name,
-                    items: [],
-                    status: 'open',
-                    createdAt: Date.now(),
-                    subtotal: 0,
-                    tax: 0,
-                    total: 0,
-                    lastPrintedItems: [],
-                };
-                setCurrentOrder(newOrder);
-                setOrders(prev => [...prev, newOrder]);
-                setOrderNumber(prev => prev + 1);
-            }
-            setCurrentView('order');
-        } else {
-            setCurrentOrder(null);
+        if (currentOrder) {
+            const { subtotal, tax, total, discountAmount } = calculateTotals(currentOrder.items, currentOrder.discount);
+            setCurrentOrder(o => o ? { ...o, subtotal, tax, total, discount: o.discount ? {...o.discount, amount: discountAmount } : undefined } : null);
         }
-    }, [selectedTableId, orders, loggedInWaiter, orderNumber, setOrderNumber, setOrders]);
+    }, [currentOrder?.items, currentOrder?.discount, calculateTotals]);
 
-    // -- Printing Logic --
-    const printContent = (htmlContent: string, containerId: string) => {
-        const container = document.getElementById(containerId);
-        if (container) {
-            container.innerHTML = htmlContent;
-            window.print();
-            container.innerHTML = '';
-        } else {
-            console.error(`Print container with id "${containerId}" not found.`);
-        }
-    };
-    
-    const handleKickDrawer = () => {
-        const kickHTML = generateCashDrawerKickHTML();
-        printContent(kickHTML, 'cash-drawer-kick-container');
-    };
-
-    // Handlers
     const handleLogin = (waiter: Waiter) => {
-        setLoggedInWaiter(waiter);
+        setCurrentWaiter(waiter);
+        const existingShift = shifts.find(s => s.waiterId === waiter.id && !s.endTime);
+        if (existingShift) {
+            setActiveShift(existingShift);
+        } else if (waiter.role === 'ADMIN' || waiter.role === 'MANAGER') {
+            setOpeningBalanceModalOpen(true);
+        } else {
+            // Waiters might not manage cash, auto-start shift
+            handleStartShift(0);
+        }
     };
 
     const handleLogout = () => {
-        setLoggedInWaiter(null);
+        setCurrentWaiter(null);
+        setActiveShift(null);
+        setCurrentScreen('table-selection');
+        setSelectedTableId(null);
+        setCurrentOrder(null);
     };
 
     const handleStartShift = (startingBalance: number) => {
-        if (!loggedInWaiter) return;
+        if (!currentWaiter) return;
         const newShift: Shift = {
             id: `shift-${Date.now()}`,
-            waiterId: loggedInWaiter.id,
-            waiterName: loggedInWaiter.name,
+            waiterId: currentWaiter.id,
+            waiterName: currentWaiter.name,
             startTime: Date.now(),
             startingBalance,
             cashSales: 0,
@@ -160,7 +123,7 @@ const App: React.FC = () => {
             expectedCash: startingBalance,
             cashIn: [],
             cashOut: [],
-            orders: []
+            orders: [],
         };
         setShifts(prev => [...prev, newShift]);
         setActiveShift(newShift);
@@ -168,433 +131,393 @@ const App: React.FC = () => {
     };
 
     const handleEndShift = () => {
-        if (openOrders.length > 0) {
-            setEndShiftWarningOpen(true);
+        if (!activeShift) return;
+        const openShiftOrders = orders.filter(o => activeShift.orders.includes(o.id) && o.status === 'open');
+        if (openShiftOrders.length > 0) {
+            setOpenOrdersForShift(openShiftOrders);
             return;
         }
         setShiftSummaryModalOpen(true);
     };
-
+    
     const handleConfirmEndShift = (actualCash: number) => {
         if (!activeShift) return;
-        const shiftToEnd = {
-            ...activeShift,
+        const totalCashIn = activeShift.cashIn.reduce((s, m) => s + m.amount, 0);
+        const totalCashOut = activeShift.cashOut.reduce((s, m) => s + m.amount, 0);
+        const expectedCash = activeShift.startingBalance + activeShift.cashSales + totalCashIn - totalCashOut;
+
+        setShifts(prev => prev.map(s => s.id === activeShift.id ? {
+            ...s,
             endTime: Date.now(),
-            actualCash: actualCash,
-            difference: actualCash - activeShift.expectedCash,
-        };
-        setActiveShift(null);
-        setShifts(prev => prev.map(s => s.id === shiftToEnd.id ? shiftToEnd : s));
+            endingBalance: actualCash,
+            actualCash,
+            expectedCash,
+            difference: actualCash - expectedCash,
+        } : s));
         setShiftSummaryModalOpen(false);
         handleLogout();
     };
 
-    // Fix: Corrected discount logic to handle different discount types, ensure values are numeric, and recalculate tax correctly after applying a discount. This resolves the arithmetic error and fixes accounting inaccuracies.
-    const updateOrderTotals = (order: Order): Order => {
-        const subtotalBeforeDiscount = order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-        
-        let discountAmount = 0;
-        if (order.discount) {
-            const discountValue = Number(order.discount.value) || 0;
-            if (order.discount.type === 'percentage') {
-                discountAmount = subtotalBeforeDiscount * (discountValue / 100);
-            } else { // 'fixed'
-                discountAmount = discountValue;
-            }
+
+    const handleSelectTable = (tableId: number) => {
+        const existingOrder = orders.find(o => o.tableNumber === tableId && o.status === 'open');
+        if (existingOrder) {
+            setCurrentOrder(existingOrder);
+        } else {
+             setIsCustomerCountModalOpen(true);
         }
-        
-        // Ensure discount doesn't exceed the total
-        discountAmount = Math.min(subtotalBeforeDiscount, discountAmount);
-        
-        const finalTotal = subtotalBeforeDiscount - discountAmount;
-        
-        // Recalculate tax based on the new total
-        const finalTax = finalTotal > 0 ? finalTotal - (finalTotal / (1 + TAX_RATE)) : 0;
-        const finalSubtotal = finalTotal - finalTax;
-        
-        return { 
-            ...order, 
-            subtotal: finalSubtotal,
-            tax: finalTax, 
-            total: finalTotal, 
-            discount: order.discount ? {...order.discount, amount: discountAmount} : undefined 
+        setSelectedTableId(tableId);
+        setCurrentScreen('order');
+    };
+
+    const handleCreateOrder = (customerCount: number) => {
+        if (!currentWaiter || !selectedTableId) return;
+        const newOrder: Order = {
+            id: `order-${Date.now()}`,
+            orderNumber: orderNumber,
+            tableNumber: selectedTableId,
+            waiterId: currentWaiter.id,
+            waiterName: currentWaiter.name,
+            items: [],
+            status: 'open',
+            createdAt: Date.now(),
+            subtotal: 0,
+            tax: 0,
+            total: 0,
+            customerId: 'cust-1', // Default 'Cliente de Paso'
         };
+        setOrders(prev => [...prev, newOrder]);
+        setCurrentOrder(newOrder);
+        setOrderNumber(prev => prev + 1);
+        setIsCustomerCountModalOpen(false);
     };
 
     const handleAddItemToOrder = (item: MenuItem) => {
         if (!currentOrder) return;
+        
         const existingItem = currentOrder.items.find(i => i.id === item.id);
-        let updatedItems;
-        if (existingItem) {
-            updatedItems = currentOrder.items.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1, additions: [...i.additions, { addedAt: Date.now() }] } : i);
-        } else {
-            updatedItems = [...currentOrder.items, { ...item, quantity: 1, additions: [{ addedAt: Date.now() }] }];
-        }
-        const updatedOrder = updateOrderTotals({ ...currentOrder, items: updatedItems });
-        setCurrentOrder(updatedOrder);
-        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    };
+        const newItemAddition: Addition = { addedAt: Date.now() };
 
+        if (existingItem) {
+            setCurrentOrder({
+                ...currentOrder,
+                items: currentOrder.items.map(i =>
+                    i.id === item.id ? { ...i, quantity: i.quantity + 1, additions: [...i.additions, newItemAddition] } : i
+                )
+            });
+        } else {
+            setCurrentOrder({
+                ...currentOrder,
+                items: [...currentOrder.items, { ...item, quantity: 1, additions: [newItemAddition] }]
+            });
+        }
+    };
+    
     const handleUpdateQuantity = (itemId: string, change: number) => {
         if (!currentOrder) return;
         const item = currentOrder.items.find(i => i.id === itemId);
         if (!item) return;
 
-        let updatedItems;
         const newQuantity = item.quantity + change;
         if (newQuantity <= 0) {
-            updatedItems = currentOrder.items.filter(i => i.id !== itemId);
-        } else {
-            updatedItems = currentOrder.items.map(i => i.id === itemId ? { ...i, quantity: newQuantity } : i);
-        }
-
-        const updatedOrder = updateOrderTotals({ ...currentOrder, items: updatedItems });
-        setCurrentOrder(updatedOrder);
-        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    };
-
-    const handleSaveAndCloseOrderView = () => {
-        if (!currentOrder) {
-            setSelectedTableId(null);
-            setCurrentView('table-selection');
-            return;
-        }
-
-        // --- Smart Kitchen Ticket Logic ---
-        // Compare current items with the last printed items to find what's new.
-        const lastItemsMap = new Map((currentOrder.lastPrintedItems || []).map(item => [item.id, item.quantity]));
-        const itemsToPrint: OrderItem[] = [];
-
-        currentOrder.items.forEach(currentItem => {
-            const lastQuantity = lastItemsMap.get(currentItem.id) || 0;
-            if (currentItem.quantity > lastQuantity) {
-                // Only print new additions, not cancellations
-                itemsToPrint.push({
-                    ...currentItem,
-                    quantity: currentItem.quantity - lastQuantity,
-                });
-            }
-        });
-
-        // If there are new items, generate and print the ticket
-        if (itemsToPrint.length > 0) {
-            const ticketOrder: Order = {
+            // Remove item
+            setCurrentOrder({
                 ...currentOrder,
-                items: itemsToPrint,
-            };
-            const kitchenTicketHTML = generateKitchenTicketHTML(ticketOrder, settings);
-            printContent(kitchenTicketHTML, 'kitchen-ticket-print-container');
+                items: currentOrder.items.filter(i => i.id !== itemId)
+            });
+        } else {
+             const newAddition: Addition = { addedAt: Date.now() };
+            // Update quantity
+            setCurrentOrder({
+                ...currentOrder,
+                items: currentOrder.items.map(i =>
+                    i.id === itemId ? { ...i, quantity: newQuantity, additions: change > 0 ? [...i.additions, newAddition] : i.additions } : i
+                )
+            });
         }
-
-        // After printing, update the order's state to reflect the new "last printed" state.
-        const updatedOrderWithPrintState = {
-            ...currentOrder,
-            // Deep copy to prevent reference issues
-            lastPrintedItems: JSON.parse(JSON.stringify(currentOrder.items)),
-        };
-        
-        setCurrentOrder(updatedOrderWithPrintState);
-        setOrders(prev => prev.map(o => o.id === updatedOrderWithPrintState.id ? updatedOrderWithPrintState : o));
-        
-        setSelectedTableId(null);
-        setCurrentView('table-selection');
     };
 
-    const handleFinalizePayment = (order: Order, payments: Payment[]) => {
-        const closedOrder = {
-            ...order,
-            status: 'closed' as const,
-            closedAt: Date.now(),
-            totalPaid: (order.totalPaid || 0) + payments.reduce((sum, p) => sum + p.amount, 0),
-            splitPayments: [...(order.splitPayments || []), ...payments]
-        };
-        setOrders(prev => prev.map(o => o.id === closedOrder.id ? closedOrder : o));
-
-        if (activeShift) {
-            const cashPayment = payments.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-            const cardPayment = payments.filter(p => p.method === 'card').reduce((sum, p) => sum + p.amount, 0);
-            const creditPayment = payments.filter(p => p.method === 'credit').reduce((sum, p) => sum + p.amount, 0);
-            
-            if (cashPayment > 0) {
-                handleKickDrawer();
-            }
-
-            setActiveShift(prev => {
-                if (!prev) return null;
-                const newShift: Shift = {
-                    ...prev,
-                    cashSales: prev.cashSales + cashPayment,
-                    cardSales: prev.cardSales + cardPayment,
-                    totalSales: prev.totalSales + cashPayment + cardPayment + creditPayment,
-                    totalDiscounts: prev.totalDiscounts + (closedOrder.discount?.amount || 0),
-                    expectedCash: prev.expectedCash + cashPayment,
-                    orders: [...prev.orders, closedOrder.id],
-                };
-                setShifts(shifts.map(s => s.id === newShift.id ? newShift : s));
-                return newShift;
+    const handleSaveAndCloseOrder = () => {
+        if (currentOrder) {
+            const itemsToPrint = currentOrder.items.filter(item => {
+                const lastPrintedVersion = currentOrder.lastPrintedItems?.find(lp => lp.id === item.id);
+                return !lastPrintedVersion || item.quantity > lastPrintedVersion.quantity;
             });
             
-            if (creditPayment > 0 && closedOrder.customerId) {
-                handleCreditPayment(closedOrder.customerId, {method: 'credit', amount: creditPayment});
+            if (itemsToPrint.length > 0) {
+                printKitchenTicket(currentOrder, itemsToPrint);
             }
+
+            setOrders(prev => prev.map(o => o.id === currentOrder.id ? {...currentOrder, lastPrintedItems: [...currentOrder.items]} : o));
         }
-        
-        setOrderToPrint(closedOrder);
-        setPaymentModalOpen(false);
-        setPostPaymentModalOpen(true);
+        setCurrentOrder(null);
+        setSelectedTableId(null);
+        setCurrentScreen('table-selection');
     };
 
     const handleCancelOrder = () => {
-        if (!currentOrder) return;
-        const cancelledOrder = { ...currentOrder, status: 'cancelled' as const, closedAt: Date.now() };
-        setOrders(prev => prev.map(o => o.id === cancelledOrder.id ? cancelledOrder : o));
+        if (!currentOrder || !window.confirm("¿Seguro que quieres cancelar este pedido? Esta acción no se puede deshacer.")) return;
+        setOrders(prev => prev.map(o => o.id === currentOrder.id ? {...o, status: 'cancelled', closedAt: Date.now()} : o));
+        setCurrentOrder(null);
         setSelectedTableId(null);
-        setCurrentView('table-selection');
-        setCancelConfirmModalOpen(false);
+        setCurrentScreen('table-selection');
     };
     
-    const handleCreditPayment = (customerId: string, payment: Payment) => {
-        setCustomers(prev => prev.map(c => {
-            if (c.id === customerId) {
-                return {
-                    ...c,
-                    creditBalance: c.creditBalance + (payment.method === 'credit' ? payment.amount : -payment.amount)
-                }
-            }
-            return c;
-        }))
+     const handleOpenDiscountModal = () => {
+        if (currentOrder) {
+            setDiscountModalOpen(true);
+        }
     };
-    
-    const handleApplyDiscount = (type: 'fixed', value: number) => {
-        if (!currentOrder) return;
-        const discount: Discount = { type, value, amount: 0 };
-        const orderWithDiscount = { ...currentOrder, discount };
-        const updatedOrder = updateOrderTotals(orderWithDiscount);
-        setCurrentOrder(updatedOrder);
-        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+
+    const handleApplyDiscount = (value: number) => {
+        if (currentOrder) {
+            const newDiscount = { type: 'fixed' as const, value, amount: 0 }; // amount will be recalculated by effect
+            setCurrentOrder({ ...currentOrder, discount: newDiscount });
+        }
         setDiscountModalOpen(false);
     };
 
     const handleRemoveDiscount = () => {
-        if (!currentOrder) return;
-        const { discount, ...orderWithoutDiscount } = currentOrder;
-        const updatedOrder = updateOrderTotals(orderWithoutDiscount);
-        setCurrentOrder(updatedOrder);
-        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        if (currentOrder) {
+            setCurrentOrder({ ...currentOrder, discount: undefined });
+        }
         setDiscountModalOpen(false);
-    }
+    };
     
-    const handleCashMovement = (amount: number, reason: string) => {
-        if (!activeShift) return;
-        const movement: CashMovement = { id: `mov-${Date.now()}`, timestamp: Date.now(), type: cashMovementType, amount, reason };
+
+    const handleFinalizePayment = (order: Order, payments: Payment[]) => {
+        const totalPaidInThisTransaction = payments.reduce((sum, p) => sum + p.amount, 0);
+        const finalTotalPaid = (order.totalPaid || 0) + totalPaidInThisTransaction;
         
-        setActiveShift(prev => {
-            if (!prev) return null;
-            const newShift: Shift = {
-                ...prev,
-                cashIn: cashMovementType === 'in' ? [...prev.cashIn, movement] : prev.cashIn,
-                cashOut: cashMovementType === 'out' ? [...prev.cashOut, movement] : prev.cashOut,
-                expectedCash: cashMovementType === 'in' ? prev.expectedCash + amount : prev.expectedCash - amount,
-            };
-            setShifts(shifts.map(s => s.id === newShift.id ? newShift : s));
-            return newShift;
-        });
-        setCashMovementModalOpen(false);
+        const finalPayments = [...(order.splitPayments || []), ...payments];
+
+        const updatedOrder: Order = {
+            ...order,
+            status: 'closed',
+            closedAt: Date.now(),
+            totalPaid: finalTotalPaid,
+            splitPayments: finalPayments,
+        };
+        setOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
+
+        // Update shift data
+        if (activeShift) {
+            const cashPaid = payments.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
+            const cardPaid = payments.filter(p => p.method === 'card').reduce((sum, p) => sum + p.amount, 0);
+            
+            setShifts(prev => prev.map(s => s.id === activeShift.id ? {
+                ...s,
+                cashSales: s.cashSales + cashPaid,
+                cardSales: s.cardSales + cardPaid,
+                totalSales: s.totalSales + order.total,
+                totalDiscounts: s.totalDiscounts + (order.discount?.amount || 0),
+                orders: [...s.orders, order.id],
+            } : s));
+        }
+        
+        // Update customer credit if paid from credit
+        if (payments.some(p => p.method === 'credit')) {
+            const creditPayment = payments.find(p => p.method === 'credit');
+            if (creditPayment && order.customerId) {
+                setCustomers(prev => prev.map(c => 
+                    c.id === order.customerId 
+                    ? { ...c, creditBalance: c.creditBalance + creditPayment.amount } 
+                    : c
+                ));
+            }
+        }
+        
+        setPaymentModalOpen(false);
+        setPostPaymentModalOpen(true);
+        setOrderForReceipt(updatedOrder);
     };
 
-    // Render logic
-    if (!loggedInWaiter) {
+    const handlePostPaymentClose = () => {
+        setPostPaymentModalOpen(false);
+        setOrderForReceipt(null);
+        setCurrentOrder(null);
+        setSelectedTableId(null);
+        setCurrentScreen('table-selection');
+    };
+    
+    const handlePrintReceipt = () => {
+        if (orderForReceipt) {
+            setReceiptPreviewModalOpen(true);
+        }
+    };
+    
+    const handleCreditPayment = (customerId: string, payment: Payment) => {
+        setCustomers(prev => prev.map(c => c.id === customerId ? {
+            ...c, creditBalance: Math.max(0, c.creditBalance - payment.amount)
+        } : c))
+    };
+
+
+    const handleCashMovement = (type: 'in' | 'out') => {
+        setCashMovementType(type);
+        setCashMovementModalOpen(true);
+    };
+    
+    const handleConfirmCashMovement = (amount: number, reason: string) => {
+        if (!activeShift) return;
+        const movement: CashMovement = {
+            id: `cash-${Date.now()}`,
+            timestamp: Date.now(),
+            type: cashMovementType,
+            amount,
+            reason
+        };
+        
+        setShifts(prev => prev.map(s => {
+            if (s.id !== activeShift.id) return s;
+            const updatedShift = {...s};
+            if (cashMovementType === 'in') {
+                updatedShift.cashIn = [...s.cashIn, movement];
+            } else {
+                updatedShift.cashOut = [...s.cashOut, movement];
+            }
+            setActiveShift(updatedShift);
+            return updatedShift;
+        }));
+        
+        setCashMovementModalOpen(false);
+    };
+    
+    const handleUpdateCustomer = (customerData: Omit<Customer, 'id' | 'creditBalance'>) => {
+        setCustomers(prev => [...prev, { ...customerData, id: `cust-${Date.now()}`, creditBalance: 0 }]);
+        setCustomerFormModalOpen(false);
+    };
+
+
+    const printWithIframe = (htmlContent: string) => {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'absolute';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const doc = iframe.contentWindow?.document;
+        if (doc) {
+            doc.open();
+            doc.write('<html><head><title>Print</title></head><body>' + htmlContent + '</body></html>');
+            doc.close();
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+        }
+
+        setTimeout(() => {
+            document.body.removeChild(iframe);
+        }, 1000); // Wait a bit before removing
+    };
+    
+    const printKitchenTicket = (order: Order, itemsToPrint: OrderItem[]) => {
+        const ticketHtml = generateKitchenTicketHTML({ ...order, items: itemsToPrint }, settings);
+        printWithIframe(ticketHtml);
+    };
+
+    const kickDrawer = () => {
+        // This is a common way to trigger a drawer kick on POS printers
+        // It prints a tiny, invisible character.
+        printWithIframe(`<div style="font-size:1px;">.</div>`);
+    }
+
+    const renderContent = () => {
+        switch (currentScreen) {
+            case 'table-selection':
+                return <TableSelectionScreen tables={tables} areas={areas} orders={orders} onSelectTable={handleSelectTable} />;
+            case 'order':
+                return currentOrder && (
+                    <div className="flex-1 flex overflow-hidden">
+                        <Menu categories={categories} menuItems={menuItems} inventory={inventory} onAddItem={handleAddItemToOrder} />
+                        <CurrentOrder 
+                            order={currentOrder}
+                            customers={customers}
+                            onUpdateQuantity={handleUpdateQuantity}
+                            onPay={() => setPaymentModalOpen(true)}
+                            onSave={handleSaveAndCloseOrder}
+                            onPrint={() => { setOrderForReceipt(currentOrder); setReceiptPreviewModalOpen(true); }}
+                            onCancel={handleCancelOrder}
+                            onOpenCustomerModal={() => setCustomerSelectionModalOpen(true)}
+                            onOpenDiscountModal={handleOpenDiscountModal}
+                            waiterRole={currentWaiter!.role}
+                        />
+                    </div>
+                );
+            case 'admin':
+                return <AdminView 
+                    categories={categories} setCategories={setCategories}
+                    menuItems={menuItems} setMenuItems={setMenuItems}
+                    waiters={waiters} setWaiters={setWaiters}
+                    inventory={inventory} setInventory={setInventory}
+                    settings={settings} setSettings={setSettings}
+                    tables={tables} setTables={setTables}
+                    areas={areas} setAreas={setAreas}
+                    shifts={shifts} setShifts={setShifts}
+                    orders={orders} setOrders={setOrders}
+                    customers={customers} setCustomers={setCustomers}
+                    currentUserRole={currentWaiter!.role}
+                    onCreditPayment={handleCreditPayment}
+                />;
+             case 'manager':
+                return <ManagerDashboard
+                    activeShift={activeShift}
+                    onCashMovement={handleCashMovement}
+                    inventory={inventory}
+                    setInventory={setInventory}
+                    menuItems={menuItems}
+                    setMenuItems={setMenuItems}
+                    currentUserRole={currentWaiter!.role}
+                />;
+             case 'customers':
+                return <div className="p-8 flex-1 overflow-y-auto"><CustomerManagement customers={customers} onUpdateCustomers={setCustomers} onCreditPayment={handleCreditPayment} /></div>;
+            default:
+                return <TableSelectionScreen tables={tables} areas={areas} orders={orders} onSelectTable={handleSelectTable} />;
+        }
+    }
+
+    if (!currentWaiter) {
         return <WaiterSelectionScreen waiters={waiters} onSelect={handleLogin} settings={settings} />;
     }
 
-    const renderScreen = () => {
-        switch (currentView) {
-            case 'table-selection':
-                return <TableSelectionScreen tables={tables} areas={areas} orders={orders} onSelectTable={setSelectedTableId} />;
-            case 'order':
-                if (currentOrder) {
-                    return (
-                        <div className="flex-1 flex min-h-0">
-                            <Menu categories={categories} menuItems={menuItems} inventory={inventory} onAddItem={handleAddItemToOrder} />
-                            <CurrentOrder 
-                                order={currentOrder} 
-                                customers={customers}
-                                onUpdateQuantity={handleUpdateQuantity}
-                                onPay={() => {
-                                    if(currentOrder.total <= 0 && currentOrder.items.length > 0) {
-                                        handleFinalizePayment(currentOrder, []);
-                                    } else {
-                                        setPaymentModalOpen(true);
-                                    }
-                                }}
-                                onSave={handleSaveAndCloseOrderView}
-                                onPrint={() => {setOrderToPrint(currentOrder); setReceiptModalOpen(true)}}
-                                onCancel={() => setCancelConfirmModalOpen(true)}
-                                onOpenCustomerModal={() => setCustomerModalOpen(true)}
-                                onOpenDiscountModal={() => setDiscountModalOpen(true)}
-                                waiterRole={loggedInWaiter.role}
-                            />
-                        </div>
-                    );
-                }
-                return null;
-            case 'admin':
-            case 'manager':
-                const ViewComponent = currentView === 'admin' ? AdminView : ManagerDashboard;
-                 return (
-                    <ViewComponent
-                        // AdminView & ManagerDashboard props
-                        categories={categories} setCategories={setCategories}
-                        menuItems={menuItems} setMenuItems={setMenuItems}
-                        waiters={waiters} setWaiters={setWaiters}
-                        inventory={inventory} setInventory={setInventory}
-                        settings={settings} setSettings={setSettings}
-                        tables={tables} setTables={setTables}
-                        areas={areas} setAreas={setAreas}
-                        shifts={shifts} setShifts={setShifts}
-                        orders={orders} setOrders={setOrders}
-                        customers={customers} setCustomers={setCustomers}
-                        currentUserRole={loggedInWaiter.role}
-                        onCreditPayment={handleCreditPayment}
-                        // ManagerDashboard specific props
-                        activeShift={activeShift}
-                        onCashMovement={(type) => {setCashMovementType(type); setCashMovementModalOpen(true);}}
-                    />
-                );
-            case 'customers':
-                return <CustomerManagement customers={customers} onUpdateCustomers={setCustomers} onCreditPayment={handleCreditPayment} />;
-            default:
-                return <TableSelectionScreen tables={tables} areas={areas} orders={orders} onSelectTable={setSelectedTableId} />;
-        }
-    };
-
     return (
-        <div className="bg-gray-800 text-white h-screen flex flex-col font-sans">
-            <Header 
-                waiter={loggedInWaiter} 
-                tableNumber={selectedTableId || undefined}
+        <div className="w-screen h-screen bg-gray-800 text-white flex flex-col font-sans">
+            <Header
+                waiter={currentWaiter}
+                tableNumber={selectedTableId ? (tables.find(t => t.id === selectedTableId)?.name ? parseInt(tables.find(t => t.id === selectedTableId)!.name.replace(/[^0-9]/g, ''), 10) : selectedTableId) : undefined}
                 onLogout={handleLogout}
-                onKickDrawer={handleKickDrawer}
-                onNavigate={setCurrentView}
-                currentView={currentView}
+                onKickDrawer={kickDrawer}
+                onNavigate={(view) => {setCurrentScreen(view); setCurrentOrder(null);}}
+                currentView={currentScreen}
                 onEndShift={handleEndShift}
                 lowStockItems={lowStockItems}
             />
-            <main className="flex-1 flex min-h-0">
-                <Sidebar onNavigate={setCurrentView} currentView={currentView} userRole={loggedInWaiter.role} />
-                {renderScreen()}
-            </main>
-            {isOpeningBalanceModalOpen && loggedInWaiter && (
-                <OpeningBalanceModal 
-                    onClose={() => setLoggedInWaiter(null)} 
-                    onConfirm={handleStartShift}
-                />
-            )}
-            {isCashMovementModalOpen && (
-                <CashMovementModal 
-                    isOpen={isCashMovementModalOpen}
-                    onClose={() => setCashMovementModalOpen(false)}
-                    type={cashMovementType}
-                    onConfirm={handleCashMovement}
-                />
-            )}
-            {isEndShiftWarningOpen && (
-                <OpenOrdersWarningModal
-                    isOpen={isEndShiftWarningOpen}
-                    onClose={() => setEndShiftWarningOpen(false)}
-                    openOrders={openOrders}
-                />
-            )}
-            {isShiftSummaryModalOpen && activeShift && (
-                <ShiftSummaryModal 
-                    isOpen={isShiftSummaryModalOpen}
-                    onClose={() => setShiftSummaryModalOpen(false)}
-                    shift={activeShift}
-                    onConfirm={handleConfirmEndShift}
-                />
-            )}
-            {isPaymentModalOpen && currentOrder && (
+            <div className="flex-1 flex overflow-hidden">
+                <Sidebar onNavigate={(view) => {setCurrentScreen(view); setCurrentOrder(null);}} currentView={currentScreen} userRole={currentWaiter.role} />
+                {renderContent()}
+            </div>
+            
+            {/* Modals */}
+            {isPaymentModalOpen && currentOrder &&
                 <PaymentModal
                     isOpen={isPaymentModalOpen}
                     onClose={() => setPaymentModalOpen(false)}
                     order={currentOrder}
                     customers={customers}
                     onFinalizePayment={handleFinalizePayment}
-                    onPartialPayment={handleFinalizePayment} // Treat partial as final for now
+                    onPartialPayment={() => { /* Not implemented for now */ }}
                 />
-            )}
-            {isCustomerModalOpen && currentOrder && (
-                <CustomerSelectionModal
-                    isOpen={isCustomerModalOpen}
-                    onClose={() => setCustomerModalOpen(false)}
-                    customers={customers}
-                    onSelectCustomer={(customerId) => {
-                        const updatedOrder = {...currentOrder, customerId: customerId || undefined };
-                        setCurrentOrder(updatedOrder);
-                        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-                        setCustomerModalOpen(false);
-                    }}
-                    onAddNewCustomer={() => { setCustomerModalOpen(false); setCustomerFormModalOpen(true); }}
-                />
-            )}
-             {isCustomerFormModalOpen && (
-                <CustomerFormModal
-                    isOpen={isCustomerFormModalOpen}
-                    onClose={() => setCustomerFormModalOpen(false)}
-                    onSave={(customerData) => {
-                        const newCustomer = { ...customerData, id: `cust-${Date.now()}`, creditBalance: 0 };
-                        setCustomers(prev => [...prev, newCustomer]);
-                        if(currentOrder) {
-                            const updatedOrder = {...currentOrder, customerId: newCustomer.id };
-                            setCurrentOrder(updatedOrder);
-                            setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-                        }
-                        setCustomerFormModalOpen(false);
-                    }}
-                    customer={null}
-                />
-            )}
-            {isReceiptModalOpen && orderToPrint && (
-                <ReceiptPreviewModal
-                    isOpen={isReceiptModalOpen}
-                    onClose={() => setReceiptModalOpen(false)}
-                    order={orderToPrint}
-                    settings={settings}
-                />
-            )}
-            {isPostPaymentModalOpen && (
-                <PostPaymentConfirmationModal 
-                    isOpen={isPostPaymentModalOpen}
-                    onClose={() => {
-                        setPostPaymentModalOpen(false);
-                        setSelectedTableId(null);
-                        setCurrentView('table-selection');
-                    }}
-                    onPrint={() => {
-                        setPostPaymentModalOpen(false);
-                        setReceiptModalOpen(true);
-                    }}
-                />
-            )}
-            {isDiscountModalOpen && currentOrder && (
-                <DiscountModal
-                    isOpen={isDiscountModalOpen}
-                    onClose={() => setDiscountModalOpen(false)}
-                    onApply={(value) => handleApplyDiscount('fixed', value)}
-                    onRemove={handleRemoveDiscount}
-                    order={currentOrder}
-                />
-            )}
-             {isCancelConfirmModalOpen && (
-                <ConfirmationModal
-                    isOpen={isCancelConfirmModalOpen}
-                    onClose={() => setCancelConfirmModalOpen(false)}
-                    title="Cancelar Pedido"
-                    message="¿Estás seguro de que quieres cancelar este pedido? Esta acción no se puede deshacer."
-                    onConfirm={handleCancelOrder}
-                    confirmText="Sí, Cancelar Pedido"
-                />
-            )}
+            }
+             {isOpeningBalanceModalOpen && <OpeningBalanceModal onClose={handleLogout} onConfirm={handleStartShift} />}
+             {isCashMovementModalOpen && <CashMovementModal isOpen={isCashMovementModalOpen} onClose={() => setCashMovementModalOpen(false)} type={cashMovementType} onConfirm={handleConfirmCashMovement} />}
+             {isShiftSummaryModalOpen && activeShift && <ShiftSummaryModal isOpen={isShiftSummaryModalOpen} onClose={() => setShiftSummaryModalOpen(false)} shift={activeShift} onConfirm={handleConfirmEndShift} />}
+             {openOrdersForShift.length > 0 && <OpenOrdersWarningModal isOpen={true} onClose={() => setOpenOrdersForShift([])} openOrders={openOrdersForShift} />}
+             {isCustomerSelectionModalOpen && currentOrder && <CustomerSelectionModal isOpen={isCustomerSelectionModalOpen} onClose={() => setCustomerSelectionModalOpen(false)} customers={customers} onSelectCustomer={(id) => {setCurrentOrder(o => o ? {...o, customerId: id || 'cust-1'} : null); setCustomerSelectionModalOpen(false);}} onAddNewCustomer={() => { setCustomerSelectionModalOpen(false); setCustomerFormModalOpen(true); }} />}
+             {isCustomerFormModalOpen && <CustomerFormModal isOpen={isCustomerFormModalOpen} onClose={() => {setCustomerFormModalOpen(false); setCustomerSelectionModalOpen(true);}} onSave={handleUpdateCustomer} customer={null}/>}
+             {isDiscountModalOpen && currentOrder && <DiscountModal isOpen={isDiscountModalOpen} onClose={() => setDiscountModalOpen(false)} order={currentOrder} onApply={handleApplyDiscount} onRemove={handleRemoveDiscount} />}
+             {isPostPaymentModalOpen && <PostPaymentConfirmationModal isOpen={isPostPaymentModalOpen} onClose={handlePostPaymentClose} onPrint={handlePrintReceipt} />}
+             {isReceiptPreviewModalOpen && orderForReceipt && <ReceiptPreviewModal isOpen={isReceiptPreviewModalOpen} onClose={() => setReceiptPreviewModalOpen(false)} order={orderForReceipt} settings={settings} />}
+             {isCustomerCountModalOpen && <CustomerCountModal isOpen={isCustomerCountModalOpen} onClose={() => {setIsCustomerCountModalOpen(false); setSelectedTableId(null); setCurrentScreen('table-selection');}} onConfirm={handleCreateOrder} />}
         </div>
     );
 };
